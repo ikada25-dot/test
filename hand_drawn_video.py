@@ -2,6 +2,7 @@
 
 紙のテクスチャ、ゆらぐ鉛筆線（ラインボイル）、クレヨン風の塗り、
 12fps の「2コマ打ち」で、雨の日に子ねこを拾った女の子のお話を描く。
+通りかかったフリーレン（ファンアート）が「花畑を出す魔法」で雨上がりにしてくれる。
 
     pip install pillow numpy imageio-ffmpeg
     python hand_drawn_video.py          # -> neko_to_watashi.mp4
@@ -445,6 +446,132 @@ def umbrella(f, cx, cy, a, p=1.0, seed=700):
     f.stroke(line(T(0, -0.85 * R), T(0, -0.85 * R - 14), over=0), p=stage(p, 1, 2), seed=seed + 6, width=4)
 
 
+FR_HAIR = (232, 234, 240)
+FR_WHITE = (250, 250, 246)
+GOLD = (214, 172, 72)
+FR_GREEN = (70, 150, 110)
+
+
+def frieren(f, x, y, s=1.0, p=1.0, walk=None, staff=0.0, wave=0.0, smile=False, t=0.0, seed=800):
+    """フリーレン（手描き風ファンアート）。(x, y) は足元。staff は杖を掲げる量 0..1、wave は手をふる量。"""
+    P = lambda px, py: (x + px * s, y + py * s)
+    sw = 12 * math.sin(walk) if walk is not None else 0
+    # 足とブーツ
+    for k, d in enumerate((-1, 1)):
+        foot = P(d * 10 + d * sw, 0)
+        f.stroke(line(P(d * 10, -60), foot, over=0), p=stage(p, 0, 6), seed=seed + k, width=3.5)
+        shape(f, circle(foot[0] + d * 3 * s, foot[1] - 6 * s, 10 * s, ry=7 * s, span=6.3, seed=seed + 2 + k),
+              (80, 60, 50), p=stage(p, 0, 6), seed=seed + 2 + k, width=2.5)
+    # ツインテール（うしろ側）
+    hp = stage(p, 3, 6)
+    for k, d in enumerate((-1, 1)):
+        tail = [P(d * (30 + 10 * math.sin(v * 2.4)), -205 + 105 * v) for v in [i / 12 for i in range(13)]]
+        tail += [P(d * (44 + 16 * math.sin(v * 2.4)) - d * 10 * v * s, -205 + 105 * v) for v in [1 - i / 12 for i in range(13)]]
+        shape(f, tail + [tail[0]], FR_HAIR, p=hp, seed=seed + 5 + k, alpha=0.9)
+    # ワンピースとケープ
+    dress = poly(P(-22, -168), P(22, -168), P(44, -56), P(-44, -56), closed=True)
+    shape(f, dress, FR_WHITE, p=stage(p, 1, 6), seed=seed + 10)
+    f.stroke(line(P(-42, -64), P(42, -64), over=0), p=stage(p, 1, 6), seed=seed + 11, color=GOLD, width=4)
+    f.stroke(line(P(0, -150), P(0, -60), over=0), p=stage(p, 1, 6), seed=seed + 12, color=GOLD, width=3)
+    cape = [P(-36, -140), P(-30, -168), P(-14, -178), P(14, -178), P(30, -168), P(36, -140)]
+    cape += [P(20 - 40 * i / 8, -136 + 6 * math.sin(math.pi * i / 8)) for i in range(9)]
+    shape(f, cape + [cape[0]], FR_WHITE, p=stage(p, 2, 6), seed=seed + 13)
+    f.stroke([P(-34, -143), P(-18, -134), P(0, -131), P(18, -134), P(34, -143)], p=stage(p, 2, 6), seed=seed + 14,
+             color=GOLD, width=3)
+    # 杖（右手）: 手元を軸に左へ傾けて掲げる
+    ap = stage(p, 2, 6)
+    hand = P(42, -110 - 30 * staff)
+    a = -0.55 * staff
+    T = lambda lx, ly: (hand[0] + rot(lx * s, ly * s, a)[0], hand[1] + rot(lx * s, ly * s, a)[1])
+    f.stroke(line(T(0, 100), T(0, -150), over=0), p=ap, seed=seed + 20, width=8)
+    f.stroke(line(T(0, 100), T(0, -150), over=0), p=ap, seed=seed + 20, color=(150, 105, 65), width=4.5,
+             alpha=255, passes=1, amp=0.8)
+    gem = T(0, -172)
+    f.stroke(circle(*gem, 22 * s, seed=seed + 21, wob=0.03), p=ap, seed=seed + 21, color=GOLD, width=5)
+    f.stroke(circle(*gem, 22 * s, seed=seed + 21, wob=0.03), p=ap, seed=seed + 21, width=2, passes=1)
+    shape(f, circle(*gem, 9 * s, span=6.3, seed=seed + 22), (220, 60, 60), p=ap, seed=seed + 22, width=2.5)
+    f.stroke(line(P(20, -160), hand, over=0), p=ap, seed=seed + 23, width=3.5)
+    dot(f, *hand, r=6 * s, color=SKIN, alpha=ap, seed=seed + 24)
+    # 頭: エルフの耳 → 顔 → 髪
+    hc = P(0, -212)
+    for k, d in enumerate((-1, 1)):
+        ear = poly(P(d * 30, -222), P(d * 72, -236), P(d * 32, -200), closed=True)
+        shape(f, ear, SKIN, p=hp, seed=seed + 30 + k)
+        f.stroke(line(P(d * 38, -200), P(d * 40, -188), over=0), p=hp, seed=seed + 32 + k, width=1.5, passes=1)
+        dot(f, *P(d * 40, -184), r=4.5 * s, color=(220, 50, 60), alpha=hp, seed=seed + 34 + k)
+    shape(f, circle(*hc, 36 * s, span=6.3, seed=seed + 36, wob=0.03), SKIN, p=hp, seed=seed + 36, alpha=0.9)
+    hair = [P(math.cos(v) * 42, -212 + math.sin(v) * 42) for v in [math.pi + i * math.pi / 20 for i in range(21)]]
+    hair += [P(40, -196), P(30, -198), P(26, -214), P(16, -222), P(6, -214), P(-4, -224), P(-14, -214),
+             P(-24, -222), P(-30, -198), P(-40, -196), hair[0]]
+    shape(f, hair, FR_HAIR, p=hp, seed=seed + 37, alpha=0.95)
+    for k, d in enumerate((-1, 1)):  # 髪どめ
+        dot(f, *P(d * 34, -198), r=5 * s, color=GOLD, alpha=hp, seed=seed + 38 + k)
+    # 表情: 半分とじた眠そうな目
+    fp = stage(p, 5, 6)
+    for k, d in enumerate((-1, 1)):
+        ex, ey = P(d * 13, -204)
+        dot(f, ex, ey + 2 * s, 4.5 * s, color=FR_GREEN, alpha=fp, seed=seed + 40 + k)
+        f.stroke(line((ex - 8 * s, ey - 2 * s), (ex + 8 * s, ey - 2 * s), over=0), p=fp, seed=seed + 42 + k, width=3)
+    if smile:
+        f.stroke(circle(*P(0, -193), 6 * s, a0=0.6, span=math.pi - 1.2, wob=0), p=fp, seed=seed + 44, width=2.5)
+    else:
+        f.stroke(line(P(-4, -190), P(4, -190), over=0), p=fp, seed=seed + 44, width=2.5, passes=1)
+    # 左手（手をふる）: 髪より手前に描く
+    wv = math.sin(t * 9) * wave
+    lh = P(-40 - 30 * wave + 12 * wv, -100 - 50 * wave)
+    f.stroke(line(P(-22, -150), lh, over=0), p=ap, seed=seed + 25, width=3.5)
+    dot(f, *lh, r=6 * s, color=SKIN, alpha=ap, seed=seed + 26)
+    return gem
+
+
+FLOWER_COLORS = [(245, 150, 170), (250, 220, 90), (255, 255, 250), (150, 170, 240), (200, 150, 230)]
+
+
+def flowers(f, t, bloom, seed=900):
+    """花畑を出す魔法。bloom は広がり具合（中心から外へ咲いていく）。"""
+    if bloom <= 0:
+        return
+    rnd = random.Random(seed)
+    for i in range(64):
+        x, y = rnd.uniform(20, 1260), rnd.uniform(572, 705)
+        if abs(x - 300) < 100 and abs(y - 620) < 22 or abs(x - 980) < 80 and abs(y - 650) < 22:
+            continue  # 水たまりはよける
+        r = rnd.uniform(9, 14) * (0.8 + 0.4 * (y - 570) / 130)
+        col = FLOWER_COLORS[i % len(FLOWER_COLORS)]
+        p = clamp(bloom * 2.2 - abs(x - 900) / 700)
+        if p <= 0:
+            continue
+        sd = seed + i * 10
+        f.stroke(line((x, y + 3 * r * p), (x, y), over=0), p=p, seed=sd, color=(90, 150, 80), width=2.5, passes=1)
+        sway = 1.5 * math.sin(t * 2 + i)
+        for k in range(5):
+            a = k * 2 * math.pi / 5 + i
+            px, py = x + sway + math.cos(a) * r * p, y + math.sin(a) * r * p
+            f.fill(circle(px, py, r * 0.7 * p + 0.5, span=6.3, seed=sd + k), col, alpha=0.95, seed=sd + k, offset=(0, 0))
+        dot(f, x + sway, y, r * 0.45 * p + 0.5, color=(240, 180, 60), alpha=p, seed=sd + 6)
+        f.stroke(circle(x + sway, y, r * 1.35 * p + 1, seed=sd, wob=0.15), p=p, seed=sd + 7, width=1.8, alpha=150, passes=1)
+
+
+def sparkle(f, x, y, size, alpha, color=(255, 245, 190), seed=0):
+    if alpha <= 0:
+        return
+    for k, (dx, dy) in enumerate(((size, 0), (0, size))):
+        f.stroke(line((x - dx, y - dy), (x + dx, y + dy), over=0), seed=seed + k, color=color, width=3,
+                 alpha=int(240 * alpha), passes=1, amp=0.4)
+
+
+def bubble(f, x, y, s, p, alpha, seed, tail_to):
+    """吹き出し。"""
+    if p <= 0 or alpha <= 0:
+        return
+    w = 30 * len(s) + 50
+    pts = circle(x, y, w / 2, ry=36, span=6.3, seed=seed, wob=0.03)
+    f.erase(pts, seed=seed)
+    f.stroke(pts, p=p, seed=seed, width=3, alpha=int(225 * alpha))
+    f.stroke(poly((x + 10, y + 34), tail_to, (x + 30, y + 30)), p=p, seed=seed + 1, width=3, alpha=int(225 * alpha))
+    f.text(s, x, y + 14, 30, p=p, alpha=alpha, seed=seed + 2, center=True)
+
+
 def rain(f, t, x0, y0, x1, y1, n, alpha, cover=None, color=(80, 110, 170)):
     """雨粒。cover=(cx, cy) の傘の下には降らない。"""
     if alpha <= 0:
@@ -488,9 +615,9 @@ def window_frame(f, x0, y0, x1, y1, p, seed):
 # ---------------------------------------------------------------- シーン
 
 T_A = 3.4   # 雨の日のであい
-T_B = 13.4  # おうちで
-T_C = 21.6  # 夜
-DURATION = 31.0
+T_B = 19.4  # おうちで
+T_C = 27.6  # 夜
+DURATION = 37.0
 
 
 def scene_title(f, t):
@@ -556,7 +683,7 @@ def scene_rain(f, t):
              eyes=g_eyes, hand=hand, seed=500)
         umbrella(f, *c, a, seed=700)
         cover = c
-        if u > 5.8:  # 女の子がぬれる
+        if 5.8 < u < 11.8:  # 女の子がぬれる
             for k in range(4):
                 ph = (t * 1.5 + k / 4) % 1
                 f.stroke(line((gx - 30 + k * 20, 340 + 60 * ph), (gx - 32 + k * 20, 350 + 60 * ph), over=0), seed=80 + k,
@@ -564,16 +691,36 @@ def scene_rain(f, t):
     else:
         cover = None
 
+    # フリーレン登場 → 花畑を出す魔法
+    fw = prog(u, 8.8, 1.6)
+    fx = lerp(1390, 1010, fw)
+    raise_ = prog(u, 11.0, 0.5) * (1 - prog(u, 13.6, 0.6))
+    clear = prog(u, 11.5, 1.2)
+    if u > 8.8:
+        gem = frieren(f, fx, 560, walk=fx * 0.05 if 0 < fw < 1 else None, staff=raise_,
+                      wave=prog(u, 14.6, 0.4), smile=u > 13.0, t=t, seed=800)
+        bubble(f, 1030, 150, "やさしいね", prog(u, 10.0, 0.4), 1 - prog(u, 11.2, 0.3), 850, (1005, 245))
+    flowers(f, t, prog(u, 11.6, 2.0))
+
     f.text("？", gx + 55, 300, 44, p=prog(u, 4.6, 0.2), alpha=1 - prog(u, 5.6, 0.3), seed=60)
     hp = prog(u, 7.0, 0.5)
     heart(f, 800, 400 - 30 * prog(u, 7.0, 2.0), 22, p=hp, alpha=1 - prog(u, 8.6, 0.5), seed=61)
 
-    rain(f, t, -40, 0, 1280, 700, 80, prog(u, 0.2, 0.6), cover=cover)
+    rain(f, t, -40, 0, 1280, 700, 80, prog(u, 0.2, 0.6) * (1 - clear), cover=cover)
 
     caption(f, t, "あめの日", T_A + 0.9, T_A + 3.8, 101)
     caption(f, t, "ひとりぼっち？", T_A + 4.2, T_A + 6.6, 102)
-    caption(f, t, "いっしょに かえろう", T_A + 7.0, T_B - 0.3, 103)
-    f.tint((212, 218, 230))
+    caption(f, t, "いっしょに かえろう", T_A + 7.0, T_A + 9.4, 103)
+    caption(f, t, "おはなばたけを だす まほう", T_A + 11.6, T_A + 14.3, 107)
+    caption(f, t, "ありがとう！", T_A + 14.5, T_B - 0.3, 108)
+    f.tint(lerp3((212, 218, 230), (255, 248, 234), clear))
+    if u > 8.8:  # 魔法の光（色調のあとに描いて光らせる）
+        f.glow(*gem, 40, (255, 240, 180), 0.8 * raise_)
+        for k in range(8):
+            ph = (t * 0.9 + k / 8) % 1
+            a = k * 2.4
+            sparkle(f, gem[0] + math.cos(a) * 140 * ph, gem[1] + math.sin(a) * 140 * ph, 10 * (1 - ph),
+                    raise_ * (1 - ph), seed=860 + k)
 
 
 def scene_home(f, t):
