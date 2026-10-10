@@ -275,6 +275,7 @@ HAIR = (112, 72, 48)
 DRESS = (222, 92, 92)
 CAT = (242, 168, 88)
 CAT_LIGHT = (252, 226, 190)
+CAT_STRIPE = (200, 120, 50)
 PINK = (240, 140, 160)
 UMBRELLA = (250, 206, 80)
 
@@ -400,7 +401,7 @@ def cat(f, x, y, s=1.0, p=1.0, pose="sit", eyes="open", tail=0.0, head=(0, 0), s
         shape(f, body, CAT, p=stage(p, 1, 4), seed=seed + 1)
         for k in range(3):
             f.stroke(circle(*P(10 + k * 16, -48), 10 * s, a0=0.3, span=2.2, wob=0), p=stage(p, 1, 4),
-                     seed=seed + 5 + k, color=(200, 120, 50), width=3)
+                     seed=seed + 5 + k, color=CAT_STRIPE, width=3)
         hc = P(-48, -38)
     hp = stage(p, 2, 4)
     hx, hy = hc
@@ -412,7 +413,7 @@ def cat(f, x, y, s=1.0, p=1.0, pose="sit", eyes="open", tail=0.0, head=(0, 0), s
     shape(f, circle(hx, hy, 32 * s, ry=29 * s, span=6.3, seed=seed + 14), CAT, p=hp, seed=seed + 14)
     for k in range(3):  # しま模様
         f.stroke(line((hx + (k - 1) * 9 * s, hy - 28 * s), (hx + (k - 1) * 8 * s, hy - 17 * s), over=0),
-                 p=hp, seed=seed + 15 + k, color=(200, 120, 50), width=3)
+                 p=hp, seed=seed + 15 + k, color=CAT_STRIPE, width=3)
     fp = stage(p, 3, 4)
     eye(f, hx - 12 * s, hy - 2 * s, s * 0.9, eyes, fp, seed + 20)
     eye(f, hx + 12 * s, hy - 2 * s, s * 0.9, eyes, fp, seed + 22)

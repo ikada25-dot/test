@@ -1,0 +1,13 @@
+{
+  "template": "pet",
+  "title": "むぎ",
+  "subtitle": "うちの子に なって 10年",
+  "cat": "kijitora",
+  "hair": "black",
+  "dress": "blue",
+  "messages": [
+    "むぎへ",
+    "これからも ずっと いっしょに いようね"
+  ],
+  "from": "かぞく みんな"
+}

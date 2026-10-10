@@ -1,0 +1,16 @@
+{
+  "template": "birthday",
+  "title": "はるかちゃん",
+  "subtitle": "5さいの おたんじょうび おめでとう",
+  "candles": 5,
+  "hair": "brown",
+  "dress": "pink",
+  "cat": "chatora",
+  "accent": "pink",
+  "messages": [
+    "うまれてきてくれて ありがとう",
+    "まいにち えがおを くれる はるかが だいすきです"
+  ],
+  "from": "パパと ママ",
+  "date": "2026.10.20"
+}

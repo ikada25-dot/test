@@ -1,0 +1,14 @@
+{
+  "template": "shop",
+  "title": "カフェ こもれび",
+  "subtitle": "10月20日 グランドオープン",
+  "accent": "green",
+  "dress": "yellow",
+  "cat": "haiiro",
+  "messages": [
+    "やきたての パンと ハンドドリップ コーヒーの おみせです",
+    "オープン記念で ドリンク 100円引き"
+  ],
+  "from": "カフェ こもれび",
+  "date": "まちかど 3丁目"
+}
