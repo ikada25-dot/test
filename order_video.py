@@ -8,11 +8,13 @@ hand_drawn_video.py の画材（紙・ゆらぐ鉛筆線・クレヨン塗り・
     python order_video.py orders/birthday.json            # 動画を書き出す
     python order_video.py orders/birthday.json --preview  # 確認用の静止画（5場面を1枚に）
     python order_video.py orders/birthday.json --sample   # 「SAMPLE」の透かし入り（入金前の確認用）
+    python order_video.py orders/birthday.json --vertical # 縦長（720×1280。リール・TikTok・ストーリーズ用）
 
 注文票の書き方は orders/README.md を参照。
 """
 
 import argparse
+import contextlib
 import json
 import math
 import multiprocessing
@@ -62,7 +64,10 @@ TITLE_DUR = 4.0
 MAIN_DUR = 12.0
 END_DUR = 5.0
 ROW_DT = 1.8  # メッセージ1行あたりの秒数
-MAX_ROWS = 6
+SCENE_W = 1280  # テンプレートの場面はこの幅で描く（縦長では縮めて下半分に置く）
+VERTICAL = False
+# 縦長で場面を置く位置: 0.9 倍にして、場面の中央 x=640 を画面の中央へ、場面の下端を画面の下端へ
+MAIN_VIEW = (0.9, 360 - 640 * 0.9, 1280 - 720 * 0.9)
 
 O = {}  # 注文票の中身（setup で埋める）
 T = {}  # 場面の開始時刻
@@ -96,7 +101,11 @@ def wrap(s, n):
     return rows
 
 
-def load_order(path):
+def max_rows(has_photo, vertical):
+    return 9 if vertical and not has_photo else 6
+
+
+def load_order(path, vertical=False):
     with open(path, encoding="utf-8") as fp:
         o = json.load(fp)
     base = os.path.dirname(os.path.abspath(path))
@@ -113,9 +122,10 @@ def load_order(path):
             o[key] = os.path.join(base, o[key])
             if not os.path.exists(o[key]):
                 raise OrderError(f"{key} のファイルが見つかりません: {o[key]}")
-    o["rows"] = [r for m in msgs for r in wrap(m, 14 if o.get("photo") else 22)]
-    if len(o["rows"]) > MAX_ROWS:
-        raise OrderError(f"メッセージが長すぎます（折り返して {len(o['rows'])} 行、{MAX_ROWS} 行まで）")
+    o["rows"] = [r for m in msgs for r in wrap(m, 14 if o.get("photo") or vertical else 22)]
+    limit = max_rows(bool(o.get("photo")), vertical)
+    if len(o["rows"]) > limit:
+        raise OrderError(f"メッセージが長すぎます（折り返して {len(o['rows'])} 行、{limit} 行まで）")
     scene = o.get("scene_captions") or []
     if len(scene) not in (0, 2) or any(len(c) > 20 for c in scene):
         raise OrderError("scene_captions は20文字以内を2つ書いてください")
@@ -131,7 +141,14 @@ def load_order(path):
     return o
 
 
-def setup(o):
+def setup(o, vertical=False):
+    global VERTICAL, W, H, PAPER, PHOTO_BOX
+    VERTICAL = vertical
+    if vertical:  # 紙とクレヨンのかすれを縦長の大きさで作りなおす
+        hv.W, hv.H = W, H = 720, 1280
+        hv.PAPER = PAPER = hv.make_paper()
+        hv.GRAIN = hv.make_grain()
+        PHOTO_BOX = (160, 170, 560, 570)
     O.clear()
     O.update(o)
     hv.HAIR, hv.DRESS = o["hair"], o["dress"]
@@ -145,6 +162,43 @@ def setup(o):
 
 def set_cat(colors):
     hv.CAT, hv.CAT_LIGHT, hv.CAT_STRIPE = colors
+
+
+def lv(landscape, vertical):
+    return vertical if VERTICAL else landscape
+
+
+class Canvas(Frame):
+    """座標を k 倍して (ox, oy) ずらして描く Frame。縦長で横長用の場面をそのまま使うため。"""
+
+    def __init__(self, t, boil, k=1.0, ox=0.0, oy=0.0):
+        super().__init__(t, boil)
+        self.k, self.ox, self.oy = k, ox, oy
+
+    def pt(self, x, y):
+        return x * self.k + self.ox, y * self.k + self.oy
+
+    def stroke(self, pts, p=1.0, seed=0, color=hv.PENCIL, width=3.0, alpha=225, amp=1.6, passes=2):
+        super().stroke([self.pt(*q) for q in pts], p, seed, color, width * self.k, alpha, amp * self.k, passes)
+
+    def _mask(self, pts, seed, blur=2.5, amp=2.5):
+        return super()._mask([self.pt(*q) for q in pts], seed, blur * self.k, amp * self.k)
+
+    def text(self, s, x, y, size, **kw):
+        super().text(s, *self.pt(x, y), max(1, int(size * self.k)), **kw)
+
+    def glow(self, cx, cy, r, color, alpha):
+        super().glow(*self.pt(cx, cy), r * self.k, color, alpha)
+
+    @contextlib.contextmanager
+    def screen(self):
+        """この中では画面の座標そのままで描く。"""
+        saved = self.k, self.ox, self.oy
+        self.k, self.ox, self.oy = 1.0, 0.0, 0.0
+        try:
+            yield self
+        finally:
+            self.k, self.ox, self.oy = saved
 
 
 # ---------------------------------------------------------------- 写真
@@ -194,24 +248,27 @@ def confetti(f, t, t0, n=70, seed=300):
     if t < t0:
         return
     rnd = random.Random(seed)
+    top = -f.oy / f.k - 20  # 画面の上端（縦長では場面より上から降らせる）
+    span = 600 - top
     for i in range(n):
-        x0, spd = rnd.uniform(0, W), rnd.uniform(110, 190)
-        y = -20 - rnd.uniform(0, 600) + (t - t0) * spd
-        if y < -20:
+        x0, spd = rnd.uniform(0, SCENE_W), rnd.uniform(110, 190)
+        y = top - rnd.uniform(0, span - 20) + (t - t0) * spd
+        if y < top:
             continue
-        y = (y + 20) % 620 - 20
+        y = (y - top) % span + top
         x = x0 + 25 * math.sin(t * 2 + i)
         a = t * 3 + i
         pts = [rot(dx, dy * math.cos(t * 5 + i), a) for dx, dy in ((-7, -4), (7, -4), (7, 4), (-7, 4))]
-        f.draw.polygon([((x + dx) * SS, (y + dy) * SS) for dx, dy in pts], fill=CONFETTI[i % 5] + (230,))
+        corners = [f.pt(x + dx, y + dy) for dx, dy in pts]
+        f.draw.polygon([(cx * SS, cy * SS) for cx, cy in corners], fill=CONFETTI[i % 5] + (230,))
 
 
 def garland(f, p, seed=310):
-    sag = lambda x: 30 + 50 * math.sin(math.pi * x / W)
-    f.stroke([(x, sag(x)) for x in range(-20, W + 21, 20)], p=p, seed=seed, width=2.5)
+    sag = lambda x: 30 + 50 * math.sin(math.pi * x / SCENE_W)
+    f.stroke([(x, sag(x)) for x in range(-20, SCENE_W + 21, 20)], p=p, seed=seed, width=2.5)
     for k in range(12):
         x = 60 + k * 105
-        fp = clamp((p * W - x) / 120)
+        fp = clamp((p * SCENE_W - x) / 120)
         y = sag(x)
         shape(f, poly((x - 22, y), (x + 22, y), (x, y + 42), closed=True), CONFETTI[k % 5], p=fp, seed=seed + 1 + k)
 
@@ -255,20 +312,39 @@ def scene_caps(defaults):
     return O.get("scene_captions") or defaults
 
 
+def cap(f, t, s, t0, t1, seed, y=70):
+    """場面の言葉。横長は左上、縦長は場面の上の空いたところに大きく。"""
+    if not VERTICAL:
+        caption(f, t, s, t0, t1, seed, y=y)
+        return
+    a = prog(t, t0, 0.3) * (1 - prog(t, t1 - 0.4, 0.4))
+    if a <= 0:
+        return
+    size = size_for(s, 54, 640)
+    w = size * 1.04 * len(s)
+    with f.screen():
+        f.text(s, 360, 470, size, p=prog(t, t0, 0.2 + 0.08 * len(s)), alpha=a, seed=seed, center=True)
+        f.stroke(line((360 - w / 2, 470 + 0.65 * size), (360 + w / 2, 472 + 0.65 * size)), p=prog(t, t0 + 0.4, 0.5),
+                 seed=seed, color=(200, 80, 60), width=4, alpha=int(200 * a))
+
+
 # ---------------------------------------------------------------- 場面
 
 def scene_title(f, t):
     a = 1 - prog(t, TITLE_DUR - 0.6, 0.6)
     title, sub = O["title"], O.get("subtitle", "")
-    f.text(title, 560, 300, size_for(title, 96, 860), p=prog(t, 0.2, 1.2), alpha=a, seed=1, center=True)
-    f.stroke(poly(*[(300 + i * 10, 372 + 6 * math.sin(i * 0.55)) for i in range(53)]),
+    # 文字の中心と幅、下線、ねこ、きらきらの位置
+    tx, ty, tw, ux, uy, un, sy, sw, cx, cy, cs, kx, ky = lv((560, 300, 860, 300, 372, 53, 450, 820, 1040, 470, 1.1, 960, 300),
+                                                         (360, 470, 620, 160, 540, 41, 630, 640, 360, 1010, 1.3, 280, 790))
+    f.text(title, tx, ty, size_for(title, 96, tw), p=prog(t, 0.2, 1.2), alpha=a, seed=1, center=True)
+    f.stroke(poly(*[(ux + i * 10, uy + 6 * math.sin(i * 0.55)) for i in range(un)]),
              p=prog(t, 1.3, 0.8), seed=2, color=O["accent"], width=5, alpha=int(210 * a))
     if sub:
-        f.text(sub, 560, 450, size_for(sub, 36, 820), p=prog(t, 1.8, 0.9), alpha=a, seed=3, center=True)
+        f.text(sub, tx, sy, size_for(sub, 36, sw), p=prog(t, 1.8, 0.9), alpha=a, seed=3, center=True)
     if a > 0.3:
-        cat(f, 1040, 470, s=1.1, p=prog(t, 1.2, 1.2), eyes="happy", tail=t * 3, seed=610)
+        cat(f, cx, cy, s=cs, p=prog(t, 1.2, 1.2), eyes="happy", tail=t * 3, seed=610)
         for k in range(3):
-            sparkle(f, 960 + k * 70, 300 - 30 * (k % 2), 10, prog(t, 2.0 + k * 0.2, 0.3) * a * (0.6 + 0.4 * math.sin(t * 6 + k)),
+            sparkle(f, kx + k * lv(70, 80), ky - 30 * (k % 2), 10, prog(t, 2.0 + k * 0.2, 0.3) * a * (0.6 + 0.4 * math.sin(t * 6 + k)),
                     seed=620 + k)
 
 
@@ -325,11 +401,11 @@ def scene_birthday(f, t, u):
             ph = (t * 3 + k / 3) % 1
             f.stroke(line((350 + 60 * ph, 360 + k * 12), (370 + 60 * ph, 360 + k * 12), over=0), seed=90 + k,
                      color=(120, 160, 210), width=3, alpha=int(200 * (1 - ph)), passes=1)
-    cat(f, 1000, 560, p=prog(u, 1.0, 1.2), eyes="happy" if happy else "open", tail=t * 3, seed=620)
+    cat(f, lv(1000, 950), 560, p=prog(u, 1.0, 1.2), eyes="happy" if happy else "open", tail=t * 3, seed=620)
     confetti(f, t, T["main"] + blow + 0.3)
     caps = scene_caps(["ろうそく ふーっ", "おめでとう！"])
-    caption(f, t, caps[0], T["main"] + 2.6, T["main"] + blow, 101, y=150)  # 旗の下に書く
-    caption(f, t, caps[1], T["main"] + blow + 0.6, T["msg"] - 0.3, 102, y=150)
+    cap(f, t, caps[0], T["main"] + 2.6, T["main"] + blow, 101, y=150)  # 旗の下に書く
+    cap(f, t, caps[1], T["main"] + blow + 0.6, T["msg"] - 0.3, 102, y=150)
     f.tint((255, 246, 230))
     for x in flames:
         f.glow(x, base - 226, 18, (255, 220, 140), 0.5 * lit)
@@ -372,8 +448,8 @@ def scene_wedding(f, t, u):
         sparkle(f, 380 + k * 105, 160 + 50 * (k % 2), 9, prog(u, 6 + k * 0.2, 0.3) * (0.5 + 0.5 * math.sin(t * 5 + k)),
                 seed=240 + k)
     caps = scene_caps(["けっこん おめでとう", "すえながく おしあわせに"])
-    caption(f, t, caps[0], T["main"] + 2.0, T["main"] + 6.4, 101)
-    caption(f, t, caps[1], T["main"] + 6.8, T["msg"] - 0.3, 102)
+    cap(f, t, caps[0], T["main"] + 2.0, T["main"] + 6.4, 101)
+    cap(f, t, caps[1], T["main"] + 6.8, T["msg"] - 0.3, 102)
     f.tint((255, 246, 236))
 
 
@@ -386,10 +462,11 @@ def scene_pet(f, t, u):
         f.stroke(pts, p=hp, seed=12 + k, width=3)
     floor(f, u, (140, 190, 110), alpha=0.5)
     sp = prog(u, 0.4, 0.8)
-    shape(f, circle(1100, 130, 48, span=6.3, seed=20), (255, 210, 90), p=sp, seed=20)
+    sx = lv(1100, 940)
+    shape(f, circle(sx, 130, 48, span=6.3, seed=20), (255, 210, 90), p=sp, seed=20)
     for k in range(10):
         a = k * math.pi / 5 + t * 0.4
-        f.stroke(line((1100 + math.cos(a) * 66, 130 + math.sin(a) * 66), (1100 + math.cos(a) * 88, 130 + math.sin(a) * 88),
+        f.stroke(line((sx + math.cos(a) * 66, 130 + math.sin(a) * 66), (sx + math.cos(a) * 88, 130 + math.sin(a) * 88),
                       over=0), p=sp, seed=21 + k, color=(240, 180, 60), width=3, passes=1)
     meadow(f, t, prog(u, 1.0, 2.5))
     # 飼い主となでられるねこ
@@ -409,8 +486,8 @@ def scene_pet(f, t, u):
         f.fill(circle(bx + d * 14 * flap, by, 14 * flap + 2, ry=16, span=6.3, seed=250 + d), (250, 200, 90),
                alpha=prog(u, 2.0, 0.5), seed=250 + d, offset=(0, 0))
     caps = scene_caps(["いつも そばに いてくれて", "ありがとう"])
-    caption(f, t, caps[0], T["main"] + 2.0, T["main"] + 6.4, 101)
-    caption(f, t, caps[1], T["main"] + 6.8, T["msg"] - 0.3, 102)
+    cap(f, t, caps[0], T["main"] + 2.0, T["main"] + 6.4, 101)
+    cap(f, t, caps[1], T["main"] + 6.8, T["msg"] - 0.3, 102)
     f.tint((255, 248, 234))
 
 
@@ -455,24 +532,28 @@ def scene_shop(f, t, u):
     walking = 0 < wk < 1
     girl(f, gx, 560 - (3 * abs(math.sin(gx * 0.05)) if walking else 0), walk=gx * 0.05 if walking else None,
          eyes="happy" if u > 5 else "open", hand=(gx + 50, 380) if u > 5 else None, seed=500)
-    cat(f, 1090, 560, p=prog(u, 1.0, 1.2), eyes="happy" if u > 5 else "open", tail=t * 3, seed=620)
+    cat(f, lv(1090, 880), 560, p=prog(u, 1.0, 1.2), eyes="happy" if u > 5 else "open", tail=t * 3, seed=620)
     for k in range(5):
         sparkle(f, 440 + k * 100, 140 + 20 * (k % 2), 9, prog(u, 4.6 + k * 0.15, 0.3) * (0.5 + 0.5 * math.sin(t * 5 + k)),
                 seed=70 + k)
     confetti(f, t, T["main"] + 5.0, n=40)
     caps = scene_caps(["あたらしい おみせ", "オープン しました！"])
-    caption(f, t, caps[0], T["main"] + 1.6, T["main"] + 4.6, 101, y=60)
-    caption(f, t, caps[1], T["main"] + 5.0, T["msg"] - 0.3, 102, y=60)
+    cap(f, t, caps[0], T["main"] + 1.6, T["main"] + 4.6, 101, y=60)
+    cap(f, t, caps[1], T["main"] + 5.0, T["msg"] - 0.3, 102, y=60)
     f.tint((255, 248, 236))
 
 
 def scene_message(f, t, u):
     rows = O["rows"]
     has_photo = O["photo_img"] is not None
-    x0 = 590 if has_photo else 100
-    x1 = 1200 if has_photo else 1180
-    top = 300 - 40 * (len(rows) - 1) + (40 if has_photo else 0)
-    top = max(top, 160)
+    if VERTICAL:  # 写真が上、メッセージが下
+        x0, x1, size, cx, center = 60, 660, 40, 360, True
+        top = 740 if has_photo else max(200, 640 - 40 * (len(rows) - 1))
+    else:  # 写真が左、メッセージが右
+        x0 = 590 if has_photo else 100
+        x1 = 1200 if has_photo else 1180
+        size, cx, center = 42, (x0 if has_photo else (x0 + x1) / 2), not has_photo
+        top = max(160, 300 - 40 * (len(rows) - 1) + (40 if has_photo else 0))
     for i in range(len(rows) + 1):  # 便せんの罫線
         y = top + 16 + i * 80
         f.stroke(line((x0 - 10, y), (x1, y + 2)), p=prog(u, 0.2 + i * 0.08, 0.8), seed=20 + i,
@@ -481,8 +562,7 @@ def scene_message(f, t, u):
         photo(f, prog(u, 0.3, 1.0))
     for i, r in enumerate(rows):
         st = 1.2 + i * ROW_DT
-        cx = (x0 + x1) / 2 if not has_photo else x0
-        f.text(r, cx, top + i * 80, 42, p=prog(u, st, 0.25 + 0.07 * len(r)), seed=30 + i, center=not has_photo)
+        f.text(r, cx, top + i * 80, size, p=prog(u, st, 0.25 + 0.07 * len(r)), seed=30 + i, center=center)
     done = 1.2 + ROW_DT * len(rows)
     heart(f, x1 - 20, top + len(rows) * 80 + 40, 18, p=prog(u, done, 0.4), seed=60)
     f.tint((255, 248, 236))
@@ -490,16 +570,18 @@ def scene_message(f, t, u):
 
 def scene_end(f, t, u):
     frm = O["from"] + " より"
-    f.text(frm, 640, 330, size_for(frm, 64, 1000), p=prog(u, 0.2, 1.0), seed=1, center=True)
+    cx, ty, tw, hy, rise, hearts, kx, ky, ks = lv((640, 330, 1000, 520, 300, (170, 300, 980, 1110), 1110, 620, 0.7),
+                                                  (360, 560, 620, 1010, 290, (90, 190, 530, 630), 360, 1060, 0.9))
+    f.text(frm, cx, ty, size_for(frm, 64, tw), p=prog(u, 0.2, 1.0), seed=1, center=True)
     if O.get("date"):
-        f.text(O["date"], 640, 410, 30, p=prog(u, 1.0, 0.5), seed=2, center=True)
-    for k, x in enumerate((170, 300, 980, 1110)):  # 文字をよけて左右にハート
+        f.text(O["date"], cx, ty + 80, 30, p=prog(u, 1.0, 0.5), seed=2, center=True)
+    for k, x in enumerate(hearts):  # 文字をよけて左右にハート
         st = 1.0 + k * 0.4
         ph = ((u - st) / 2.4) % 1 if u > st else -1
         if ph >= 0:
-            heart(f, x + 12 * math.sin(t * 3 + k), 520 - 300 * ph, 16 + 3 * (k % 2), p=prog(ph, 0, 0.1),
+            heart(f, x + 12 * math.sin(t * 3 + k), hy - rise * ph, 16 + 3 * (k % 2), p=prog(ph, 0, 0.1),
                   alpha=1 - ph, seed=90 + k)
-    cat(f, 1110, 620, s=0.7, p=prog(u, 0.6, 1.0), eyes="happy", tail=t * 3, seed=620)
+    cat(f, kx, ky, s=ks, p=prog(u, 0.6, 1.0), eyes="happy", tail=t * 3, seed=620)
     f.tint((255, 248, 236))
 
 
@@ -507,11 +589,16 @@ MAIN = {"birthday": scene_birthday, "wedding": scene_wedding, "pet": scene_pet, 
 
 
 def render(t, boil, watermark=False):
-    f = Frame(t, boil)
+    main = T["main"] <= t < T["msg"]
+    f = Canvas(t, boil, *MAIN_VIEW) if VERTICAL and main else Canvas(t, boil)
     if t < T["main"]:
         scene_title(f, t)
-    elif t < T["msg"]:
+    elif main:
         MAIN[O["template"]](f, t, t - T["main"])
+        if VERTICAL:  # 縦長は上の空いたところに名前を出しておく
+            with f.screen():
+                title = O["title"]
+                f.text(title, 360, 220, size_for(title, 60, 600), p=prog(t, T["main"] + 0.3, 0.8), seed=5, center=True)
     elif t < T["end"]:
         scene_message(f, t, t - T["msg"])
     else:
@@ -527,7 +614,7 @@ def render(t, boil, watermark=False):
         img = Image.blend(img, paper, fo)
     if watermark:
         mark = Image.new("L", (W, H), 0)
-        ImageDraw.Draw(mark).text((W // 2, H // 2), "SAMPLE", font=ImageFont.truetype(FONT_PATH, 200), fill=70,
+        ImageDraw.Draw(mark).text((W // 2, H // 2), "SAMPLE", font=ImageFont.truetype(FONT_PATH, min(200, W // 4)), fill=70,
                                   anchor="mm")
         img.paste((255, 255, 255), (0, 0), mark.rotate(18))
     return img
@@ -542,9 +629,10 @@ def _render_to(job):
 
 def preview(path, watermark):
     times = [2.6, T["main"] + 4.0, T["main"] + 10.0, T["end"] - 1.0, T["end"] + 3.6]
-    sheet = Image.new("RGB", (1280, 360 * 3), (40, 40, 48))
+    cols, tw, th = (3, 360, 640) if VERTICAL else (2, 640, 360)
+    sheet = Image.new("RGB", (cols * tw, -(-len(times) // cols) * th), (40, 40, 48))
     for k, s in enumerate(times):
-        sheet.paste(render(s, int(s * FPS), watermark).resize((640, 360)), ((k % 2) * 640, (k // 2) * 360))
+        sheet.paste(render(s, int(s * FPS), watermark).resize((tw, th)), ((k % cols) * tw, (k // cols) * th))
     sheet.save(path)
 
 
@@ -583,14 +671,16 @@ def main():
     ap.add_argument("--out", help="書き出し先（省略すると out/<注文票の名前>.mp4）")
     ap.add_argument("--preview", action="store_true", help="動画のかわりに確認用の静止画を書き出す")
     ap.add_argument("--sample", action="store_true", help="「SAMPLE」の透かしを入れる")
+    ap.add_argument("--vertical", action="store_true", help="縦長（720×1280）で書き出す")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count(), help="同時に描くコマ数")
     args = ap.parse_args()
     try:
-        order = load_order(args.order)
+        order = load_order(args.order, args.vertical)
     except (OrderError, json.JSONDecodeError) as e:
         sys.exit(f"注文票のエラー: {e}")
-    setup(order)
-    stem = os.path.splitext(os.path.basename(args.order))[0] + ("_sample" if args.sample else "")
+    setup(order, args.vertical)
+    stem = (os.path.splitext(os.path.basename(args.order))[0] + ("_vertical" if args.vertical else "")
+            + ("_sample" if args.sample else ""))
     out = args.out or os.path.join("out", stem + ("_preview.png" if args.preview else ".mp4"))
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     if args.preview:

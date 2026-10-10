@@ -6,7 +6,12 @@
 python order_video.py orders/birthday.json --preview --sample  # 1. 確認用の静止画をお客さんに送る
 python order_video.py orders/birthday.json --sample            # 2. 透かし入りの動画で最終確認
 python order_video.py orders/birthday.json                     # 3. 入金後、透かしなしで納品
+python order_video.py orders/birthday.json --vertical          # 縦長版（720×1280）。上の3つにも付けられる
 ```
+
+`--vertical` を付けると、同じ注文票から縦長（リール・TikTok・ストーリーズ向け）の動画ができます。
+ファイル名の最後に `_vertical` が付きます。縦長では、テンプレートの場面を画面の下半分に置き、
+上半分に名前と場面の言葉を大きく出します。メッセージは写真の下に入ります。
 
 書き出し先は `out/` です（`--out` で変更可）。4コアのマシンで、30秒の動画が1〜2分で書き出せます。
 
@@ -26,7 +31,7 @@ python order_video.py orders/birthday.json                     # 3. 入金後、
 | `template` | ○ | `birthday`（誕生日）/ `wedding`（結婚）/ `pet`（ペット）/ `shop`（開店・お店のPR） |
 | `title` | ○ | 名前など。shop では看板の文字にもなる。10文字くらいまでが見やすい |
 | `subtitle` | | タイトルの下の一言 |
-| `messages` | ○ | メッセージ。配列で1要素が1段落。自動で折り返し、全部で6行まで（写真ありは1行14文字、なしは22文字） |
+| `messages` | ○ | メッセージ。配列で1要素が1段落。自動で折り返す（横長は写真ありで1行14文字・6行まで、なしで22文字・6行まで。縦長は1行14文字で、写真ありは6行、なしは9行まで） |
 | `from` | ○ | 送り主。最後に「〜 より」と出る |
 | `date` | | 最後に小さく出る日付や住所 |
 | `photo` | | 写真のパス（注文票からの相対パス）。色鉛筆風に加工して額に入れる |
